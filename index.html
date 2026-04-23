@@ -1,0 +1,500 @@
+
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Бесконечное мерцание сердец | ЛЮБОВЬ</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            user-select: none;
+        }
+
+        body {
+            min-height: 100vh;
+            background: radial-gradient(circle at center, #0a0f1a 0%, #020408 100%);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-family: 'Fira Code', 'Cascadia Code', 'Courier New', monospace;
+            padding: 20px;
+            position: relative;
+            overflow-x: hidden;
+            cursor: crosshair;
+        }
+
+        /* Главная карточка — тёмное стекло с неоновой рамкой */
+        .valentine-card {
+            background: rgba(8, 15, 22, 0.65);
+            backdrop-filter: blur(12px);
+            border-radius: 56px;
+            border: 1px solid rgba(255, 70, 110, 0.7);
+            box-shadow: 0 30px 50px rgba(0, 0, 0, 0.6), 0 0 0 2px rgba(255, 60, 100, 0.3) inset, 0 0 0 4px rgba(0, 0, 0, 0.3) inset;
+            max-width: 520px;
+            width: 100%;
+            padding: 3rem 2rem;
+            transition: all 0.25s ease;
+            z-index: 10;
+            text-align: center;
+        }
+
+        /* Кнопка стиль — киберпанк + любовь */
+        .heartbeat-btn {
+            background: rgba(0, 0, 0, 0.45);
+            border: 1.8px solid #d6285c;
+            color: #ffb7c5;
+            font-family: 'Fira Code', monospace;
+            font-weight: bold;
+            font-size: 1.25rem;
+            padding: 18px 32px;
+            border-radius: 90px;
+            cursor: pointer;
+            transition: 0.2s;
+            width: 100%;
+            backdrop-filter: blur(5px);
+            letter-spacing: 2px;
+            box-shadow: 0 0 12px rgba(255, 48, 98, 0.8);
+            text-transform: uppercase;
+        }
+
+        .heartbeat-btn:hover {
+            background: #ff3366aa;
+            box-shadow: 0 0 28px #ff2a6d, 0 0 8px #ff99bb;
+            border-color: #ff99cc;
+            color: #ffffff;
+            transform: scale(0.97);
+            letter-spacing: 2.5px;
+        }
+
+        .heartbeat-btn:active {
+            transform: scale(0.95);
+        }
+
+        /* Canvas поверх всего — для сердечек */
+        #sparkle-canvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 100;
+        }
+
+        /* маленький декоративный текст в подвале (стиль) */
+        .glint-text {
+            position: fixed;
+            bottom: 12px;
+            right: 16px;
+            font-size: 11px;
+            color: rgba(255, 140, 170, 0.4);
+            font-family: monospace;
+            pointer-events: none;
+            z-index: 105;
+            background: rgba(0,0,0,0.3);
+            padding: 4px 10px;
+            border-radius: 30px;
+            backdrop-filter: blur(2px);
+        }
+
+        @media (max-width: 550px) {
+            .valentine-card {
+                padding: 2rem 1.5rem;
+            }
+            .heartbeat-btn {
+                font-size: 1rem;
+                padding: 14px 24px;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <canvas id="sparkle-canvas"></canvas>
+    
+    <div class="valentine-card">
+        <button class="heartbeat-btn" id="addHeartsBtn">
+            ВЗРЫВ СЕРДЕЦ
+        </button>
+    </div>
+    <script>
+        (function() {
+            // --------------------------------------------------------------
+            // РАСШИРЕННАЯ СИСТЕМА СЕРДЕЧЕК: БОЛЬШЕ ПЛОТНОСТЬ, ЧАЩЕ ОБНОВЛЕНИЯ
+            // --------------------------------------------------------------
+            const canvas = document.getElementById('sparkle-canvas');
+            let ctx = canvas.getContext('2d');
+            let hearts = [];           // массив частиц-сердец
+            let animationFrame = null;
+            let canvasWidth = 0, canvasHeight = 0;
+
+            // ---------- НОВЫЕ ПАРАМЕТРЫ ДЛЯ "БОЛЬШЕ СЕРДЕЦ" И "ИСЧЕЗАЮТ ЧАЩЕ" ----------
+            const MAX_HEARTS_GLOBAL = 220;           // 🧡 значительно больше сердечек одновременно (было 125)
+            const BASE_HEART_LIFE = 850;             // 🧡 уменьшили жизнь, чтобы чаще исчезали (раньше ~1200)
+            const LIFE_VARIATION = 500;               // разброс жизни - одни живут 600ms, другие до 1350ms
+            const SPAWN_RATE_MS = 180;                // 🧡 фоновый спавн КАЖДЫЕ 180мс (раньше было 500) => сердечки появляются чаще
+            const CLICK_SPAWN_COUNT = 32;              // при клике аж 32 сердца (взрыв)
+            const MOUSE_MOVE_SPAWN_DELAY = 70;         // задержка для мыши - каждые 70мс (раньше 160) => след из сердец активнее
+            const MAX_BURST_PER_MOVE = 2;               // при движении мыши до 2 сердец за раз
+            const EXTRA_RANDOM_SPAWN_ON_FRAME = 0.28;   // 28% шанс на кадр добавить 1 сердце (динамический пульс)
+            
+            // стили свечения - сделаем их ярче и "дрожание" чаще
+            let backgroundSpawnInterval = null;
+
+            // функция изменения размеров canvas
+            function resizeCanvas() {
+                canvasWidth = window.innerWidth;
+                canvasHeight = window.innerHeight;
+                canvas.width = canvasWidth;
+                canvas.height = canvasHeight;
+            }
+
+            // ----- Улучшенный класс сердца с более быстрым затуханием и полётом -----
+            class SparkHeart {
+                constructor(x, y, size, lifeDuration, birthTime) {
+                    this.x = x;
+                    this.y = y;
+                    this.baseSize = size;
+                    this.life = lifeDuration;        // полное время жизни
+                    this.born = birthTime;            // время создания
+                    // Дрейф: более живое движение, чуть быстрее улетают, чтобы освободить место
+                    this.driftX = (Math.random() - 0.5) * 3.95;
+                    this.driftY = (Math.random() - 0.8) * 0.9 - 0.5;
+                    // добавим небольшое вращение / мерцание с индивидуальной фазой
+                    this.wigglePhase = Math.random() * Math.PI * 2;
+                    this.scalePhase = Math.random() * 100;
+                }
+                
+                getAge(now) {
+                    return now - this.born;
+                }
+                
+                isAlive(now) {
+                    return this.getAge(now) < this.life;
+                }
+                
+                // Прозрачность с более быстрым спадом + мерцание
+                getAlpha(now) {
+                    let age = this.getAge(now);
+                    if (age >= this.life) return 0;
+                    let t = age / this.life;
+                    // экспоненциальное затухание — сердечки быстро исчезают под конец, создавая эффект "чаще меняются"
+                    let fade = 1 - Math.pow(t, 1.2);
+                    // мерцание с высокой частотой (2.4x)
+                    let flicker = 0.65 + Math.sin(now * 0.018 + this.wigglePhase) * 0.35;
+                    let alpha = fade * (0.65 + flicker * 0.35);
+                    return Math.min(0.98, Math.max(0, alpha));
+                }
+                
+                // Интенсивность свечения - пульсирующая
+                getGlow(now) {
+                    let age = this.getAge(now);
+                    let t = Math.min(1, age / this.life);
+                    let lifeFactor = 1 - t * 0.85;
+                    let pulse = (Math.sin(now * 0.012 + this.scalePhase) + 1) / 2;
+                    let intensity = (pulse * 0.9 + 0.3) * lifeFactor;
+                    return Math.min(1.0, Math.max(0.2, intensity));
+                }
+                
+                // Обновление позиции с затуханием скорости
+                updatePosition(now) {
+                    let age = this.getAge(now);
+                    let t = Math.min(1, age / this.life);
+                    // замедление дрейфа к концу жизни
+                    let speedMul = 1 - t * 0.5;
+                    this.x += this.driftX * speedMul * 1.1;
+                    this.y += this.driftY * speedMul * 0.9;
+                    // динамический размер: сначала чуть больше, потом уменьшается
+                    let sizeFactor = 1 - t * 0.55;
+                    let finalSize = this.baseSize * Math.max(0.3, sizeFactor);
+                    return finalSize;
+                }
+            }
+
+
+
+
+
+
+
+
+            
+            
+            // ------ ОТРИСОВКА СЕРДЦА С НЕОНОВЫМ ЭФФЕКТОМ ------
+            function renderHeart(ctx, x, y, size, alphaVal, glowIntensity) {
+                ctx.save();
+                // тень для неона — сильная + динамическая
+                const glowSize = 13 + glowIntensity * 23;
+                ctx.shadowBlur = glowSize;
+                ctx.shadowColor = `rgba(255, 70, 120, ${0.65 + glowIntensity * 0.35})`;
+                
+                // отрисовка пути сердца (стандартная форма)
+                ctx.beginPath();
+                const topCurve = size * 0.32;
+                ctx.moveTo(x, y + size * 0.25);
+                ctx.bezierCurveTo(x, y, x - size * 0.52, y, x - size * 0.52, y + topCurve);
+                ctx.bezierCurveTo(x - size * 0.52, y + topCurve + size*0.27, x, y + size*0.72, x, y + size*0.92);
+                ctx.bezierCurveTo(x, y + size*0.72, x + size * 0.52, y + topCurve + size*0.27, x + size * 0.52, y + topCurve);
+                ctx.bezierCurveTo(x + size * 0.52, y, x, y, x, y + size * 0.25);
+                ctx.closePath();
+                
+                // градиент от насыщенно-розового к ярко-алому
+                const grad = ctx.createLinearGradient(x - size*0.3, y - size*0.2, x + size*0.3, y + size*0.6);
+                grad.addColorStop(0, `rgba(255, 70, 110, ${0.8 + glowIntensity * 0.2})`);
+                grad.addColorStop(0.7, `rgba(255, 35, 85, ${0.85 + glowIntensity * 0.15})`);
+                grad.addColorStop(1, `rgba(220, 20, 70, ${0.9})`);
+                ctx.fillStyle = grad;
+                ctx.fill();
+                
+                // добавим внутренний блеск
+                ctx.shadowBlur = glowSize * 0.65;
+                ctx.fillStyle = `rgba(255, 210, 225, ${0.3 + glowIntensity * 0.3})`;
+                ctx.fill();
+                
+                // контур пламенный
+                ctx.strokeStyle = `rgba(255, 140, 160, ${0.7 + glowIntensity * 0.3})`;
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+                ctx.restore();
+            }
+            
+            // функция добавления сердца с учётом границ
+            function addHeartAt(x, y, customSize = null) {
+                if (hearts.length > MAX_HEARTS_GLOBAL + 20) {
+                    // если переполнение, удаляем самые старые 10 штук
+                    hearts.splice(0, 10);
+                }
+                const now = performance.now();
+                // НОВАЯ ЖИЗНЬ: меньше длительность -> исчезают чаще (850ms +/- вариация)
+                let lifeSpan = BASE_HEART_LIFE + (Math.random() * LIFE_VARIATION) - 150;
+                if (lifeSpan < 480) lifeSpan = 520;   // минимум ~0.5 секунды, чтобы выглядело динамично
+                const heartSize = customSize || (13 + Math.random() * 26);
+                // обрезка по краям, чтобы не за границы
+                let safeX = Math.min(canvasWidth - 15, Math.max(15, x));
+                let safeY = Math.min(canvasHeight - 15, Math.max(15, y));
+                const newHeart = new SparkHeart(safeX, safeY, heartSize, lifeSpan, now);
+                hearts.push(newHeart);
+            }
+            
+            // добавить несколько случайных сердец
+            function spawnRandomHearts(count = 1, fromRandomRegion = true) {
+                for (let i = 0; i < count; i++) {
+                    let randX, randY;
+                    if (fromRandomRegion && hearts.length < MAX_HEARTS_GLOBAL) {
+                        randX = 30 + Math.random() * (canvasWidth - 60);
+                        randY = 40 + Math.random() * (canvasHeight - 70);
+                    } else {
+                        randX = canvasWidth / 2 + (Math.random() - 0.5) * canvasWidth * 0.7;
+                        randY = canvasHeight / 2 + (Math.random() - 0.5) * canvasHeight * 0.6;
+                    }
+                    addHeartAt(randX, randY, 14 + Math.random() * 28);
+                }
+            }
+            
+            // обработка клика (ВЗРЫВ) - много сердец и плюс дополнительные
+            function onButtonClick(event) {
+                let clickX, clickY;
+                if (event.clientX && event.clientY) {
+                    clickX = event.clientX;
+                    clickY = event.clientY;
+                } else {
+                    clickX = canvasWidth / 2;
+                    clickY = canvasHeight / 2;
+                }
+                // основной взрывной пучок
+                for (let i = 0; i < CLICK_SPAWN_COUNT; i++) {
+                    const angle = Math.random() * Math.PI * 2;
+                    const radius = Math.random() * 110;
+                    const offsetX = Math.cos(angle) * radius * (Math.random() * 0.9);
+                    const offsetY = Math.sin(angle) * radius * 0.8;
+                    let newX = clickX + offsetX;
+                    let newY = clickY + offsetY - 12;
+                    let sizeVariety = 15 + Math.random() * 32;
+                    addHeartAt(newX, newY, sizeVariety);
+                }
+                // дополнительная "вспышка" вокруг центра
+                for (let s = 0; s < 12; s++) {
+                    let extraX = clickX + (Math.random() - 0.5) * 180;
+                    let extraY = clickY + (Math.random() - 0.5) * 150;
+                    addHeartAt(extraX, extraY, 12 + Math.random() * 24);
+                }
+                // эффект нажатия кнопки
+                const btn = document.getElementById('addHeartsBtn');
+                if (btn) {
+                    btn.style.transform = 'scale(0.94)';
+                    setTimeout(() => { if (btn) btn.style.transform = ''; }, 130);
+                }
+            }
+            
+            // ----------- ОСНОВНОЙ ЦИКЛ АНИМАЦИИ + УДАЛЕНИЕ МЁРТВЫХ СЕРДЕЦ ----------
+            let previousTimestamp = 0;
+            function animationLoop(now) {
+                if (!ctx) return;
+                // Очищаем canvas
+                ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+                
+                // 1) Удаляем мёртвые сердца (те, чья жизнь истекла) — это гарантирует, что они "чаще меняются"
+                const aliveHearts = [];
+                for (let i = 0; i < hearts.length; i++) {
+                    const h = hearts[i];
+                    if (h.isAlive(now)) {
+                        aliveHearts.push(h);
+                    }
+                }
+                hearts = aliveHearts;
+                
+                // 2) ДОПОЛНИТЕЛЬНЫЙ ДИНАМИЧЕСКИЙ СПАВН НА КАЖДОМ КАДРЕ (чтобы толпа сердец не редела)
+                //    Если сердец меньше чем 100 – подкидываем чаще. Если максимум не достигнут – случайно добавляем.
+                if (hearts.length < MAX_HEARTS_GLOBAL * 0.85) {
+                    // дополнительный шанс добавить 1-2 сердца для оживления
+                    if (Math.random() < 0.38) {
+                        spawnRandomHearts(1, true);
+                    }
+                } else if (hearts.length < MAX_HEARTS_GLOBAL - 15 && Math.random() < 0.22) {
+                    spawnRandomHearts(1);
+                }
+                
+                // специальный малый шанс на всплеск (пульс)
+                if (Math.random() < EXTRA_RANDOM_SPAWN_ON_FRAME && hearts.length < MAX_HEARTS_GLOBAL + 5) {
+                    let randSpawn = Math.random() > 0.6 ? 2 : 1;
+                    spawnRandomHearts(randSpawn, true);
+                }
+                
+                // 3) Отрисовка ВСЕХ сердечек с эффектами
+                for (let heart of hearts) {
+                    const ageNow = now;
+                    const alphaHeart = heart.getAlpha(ageNow);
+                    if (alphaHeart <= 0.02) continue;
+                    const currentSz = heart.updatePosition(ageNow);
+                    if (currentSz < 2.5) continue;
+                    const glowVal = heart.getGlow(ageNow);
+                    ctx.save();
+                    ctx.globalAlpha = Math.min(0.93, alphaHeart * 0.95);
+                    renderHeart(ctx, heart.x, heart.y, currentSz, alphaHeart, glowVal);
+                    ctx.restore();
+                }
+                
+                // небольшое ограничение: если массив разросся сверх лимита, убираем лишние (на всякий)
+                if (hearts.length > MAX_HEARTS_GLOBAL + 15) {
+                    hearts = hearts.slice(-MAX_HEARTS_GLOBAL);
+                }
+                
+                animationFrame = requestAnimationFrame(animationLoop);
+            }
+            
+            // Фоновый интервальный спавн (каждые 180мс) — сердечки появляются ритмично
+            function startBackgroundSpawner() {
+                if (backgroundSpawnInterval) clearInterval(backgroundSpawnInterval);
+                backgroundSpawnInterval = setInterval(() => {
+                    if (document.hidden) return;
+                    // Больше сердечек в фоне: от 1 до 3 штук за раз (раньше было 1-2)
+                    let howMany = Math.random() > 0.65 ? 2 : 1;
+                    if (hearts.length < MAX_HEARTS_GLOBAL - 35) {
+                        howMany = Math.random() > 0.55 ? 2 : (Math.random() > 0.8 ? 3 : 1);
+                    }
+                    spawnRandomHearts(howMany, true);
+                }, SPAWN_RATE_MS);   // 180 мс - очень активный фоновый поток
+            }
+            
+            // ---------- ОБРАБОТЧИК ДВИЖЕНИЯ МЫШИ: след почта мгновенный (чаще сердечки) ----------
+            let lastMouseMoveTime = 0;
+            function onMouseMove(e) {
+                const nowTime = Date.now();
+                if (nowTime - lastMouseMoveTime > MOUSE_MOVE_SPAWN_DELAY) {
+                    lastMouseMoveTime = nowTime;
+                    let mx = e.clientX;
+                    let my = e.clientY;
+                    if (mx > 0 && my > 0 && mx < canvasWidth && my < canvasHeight && hearts.length < MAX_HEARTS_GLOBAL + 30) {
+                        const heartsToAdd = Math.random() > 0.65 ? 2 : 1;
+                        for (let i = 0; i < heartsToAdd; i++) {
+                            let offsetX = (Math.random() - 0.5) * 40;
+                            let offsetY = (Math.random() - 0.5) * 32;
+                            let mxFinal = Math.min(canvasWidth - 12, Math.max(12, mx + offsetX));
+                            let myFinal = Math.min(canvasHeight - 12, Math.max(12, my + offsetY));
+                            addHeartAt(mxFinal, myFinal, 12 + Math.random() * 24);
+                        }
+                    }
+                }
+            }
+            
+            // touch-события для мобильных устройств (чтобы тоже давали взрыв сердечек)
+            function onTouchMove(e) {
+                if (e.touches.length) {
+                    const touch = e.touches[0];
+                    const nowT = Date.now();
+                    if (nowT - lastMouseMoveTime > MOUSE_MOVE_SPAWN_DELAY) {
+                        lastMouseMoveTime = nowT;
+                        let tx = touch.clientX;
+                        let ty = touch.clientY;
+                        if (tx > 0 && ty > 0 && tx < canvasWidth && ty < canvasHeight && hearts.length < MAX_HEARTS_GLOBAL + 30) {
+                            addHeartAt(tx, ty, 14 + Math.random() * 23);
+                            if (Math.random() > 0.7) addHeartAt(tx + (Math.random() - 0.5)*35, ty + (Math.random() - 0.5)*30, 12+Math.random()*18);
+                        }
+                    }
+                }
+            }
+            
+            // инициализация всех систем + адаптив
+            function initFullSystem() {
+                resizeCanvas();
+                startBackgroundSpawner();
+                animationFrame = requestAnimationFrame(animationLoop);
+                
+                window.addEventListener('resize', () => {
+                    resizeCanvas();
+                    // после ресайза корректируем позиции существующих сердечек, чтобы не вылетали
+                    for (let h of hearts) {
+                        h.x = Math.min(canvasWidth - 15, Math.max(15, h.x));
+                        h.y = Math.min(canvasHeight - 15, Math.max(15, h.y));
+                    }
+                });
+                
+                const btn = document.getElementById('addHeartsBtn');
+                if (btn) {
+                    btn.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        onButtonClick(e);
+                    });
+                }
+                
+                // Подключаем события мыши и касания, чтобы создавать больше жизненности
+                window.addEventListener('mousemove', onMouseMove);
+                window.addEventListener('touchmove', onTouchMove);
+                window.addEventListener('touchstart', (e) => {
+                    if (e.touches.length) {
+                        const t = e.touches[0];
+                        for (let i=0; i<4; i++) {
+                            addHeartAt(t.clientX + (Math.random() - 0.5)*45, t.clientY + (Math.random() - 0.5)*45, 14+Math.random()*25);
+                        }
+                    }
+                });
+                
+                // начальный фейерверк : много сердечек при загрузке (динамика)
+                for (let i = 0; i < 55; i++) {
+                    setTimeout(() => {
+                        if (hearts.length < MAX_HEARTS_GLOBAL + 10) {
+                            const randSideX = 30 + Math.random() * (canvasWidth - 60);
+                            const randSideY = 30 + Math.random() * (canvasHeight - 60);
+                            addHeartAt(randSideX, randSideY, 14 + Math.random() * 32);
+                        }
+                    }, i * 28);
+                }
+                
+                // дополнительный таймер, чтобы каждые 2.5 секунды добавлять небольшую порцию (до 3 сердец)
+                setInterval(() => {
+                    if (!document.hidden && hearts.length < MAX_HEARTS_GLOBAL - 20) {
+                        for (let q=0; q<2; q++) spawnRandomHearts(1);
+                    } else if (hearts.length < MAX_HEARTS_GLOBAL && Math.random() > 0.5) {
+                        spawnRandomHearts(1);
+                    }
+                }, 1200);
+            }
+            
+            initFullSystem();
+        })();
+    </script>
+</body>
+</html>
